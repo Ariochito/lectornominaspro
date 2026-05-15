@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel de Nómina CFDI</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">N</div>
+        <div>
+          <strong>Panel de Nómina CFDI</strong>
+          <small>Consulta, revisa y presenta la nómina con claridad.</small>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Navegación principal">
+        <button class="tab-button active" type="button" data-tab="resumen">Resumen</button>
+        <button class="tab-button" type="button" data-tab="cfdi">CFDI</button>
+        <button class="tab-button" type="button" data-tab="movimientos">Movimientos</button>
+        <button class="tab-button" type="button" data-tab="totales">Totales por concepto</button>
+        <button class="tab-button" type="button" data-tab="periodos">Totales por periodo</button>
+        <button class="tab-button" type="button" data-tab="direccion">Indicadores de Dirección</button>
+        <button class="tab-button" type="button" data-tab="exportaciones">Exportaciones</button>
+      </nav>
+
+      <section class="sidebar-card compact">
+        <h2>Seguimiento</h2>
+        <p id="status" class="muted">Sin archivos cargados.</p>
+      </section>
+
+      <section class="sidebar-card compact">
+        <h2>Ayuda rápida</h2>
+        <ul class="plain-list muted small-text">
+          <li>Carga uno o varios recibos para actualizar el tablero.</li>
+          <li>Usa filtros para enfocar empleados, periodos o incidencias.</li>
+          <li>Exporta la vista actual cuando necesites compartir resultados.</li>
+          <li>Revisa alertas y duplicidades antes de cerrar el periodo.</li>
+        </ul>
+      </section>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header card">
+        <div>
+          <p class="eyebrow">Control y análisis de nómina</p>
+          <h1>Panel de revisión y seguimiento de recibos de nómina</h1>
+          <p class="muted">Centraliza la revisión de periodos, conceptos y alertas para tomar decisiones con mayor claridad.</p>
+        </div>
+        <div class="header-actions">
+          <button id="clear-data-btn" type="button" class="ghost danger">Limpiar datos</button>
+        </div>
+      </header>
+
+      <section class="upload-grid">
+        <article class="card upload-card">
+          <h2>Incorporar recibos</h2>
+          <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Zona para arrastrar archivos XML">
+            <strong>Arrastra aquí los recibos de nómina</strong>
+            <span>o haz clic para seleccionar los archivos a revisar</span>
+          </div>
+          <div class="upload-actions">
+            <label class="field-stack">
+              <span>Seleccionar archivos</span>
+              <input type="file" id="file-input" multiple accept=".xml">
+            </label>
+            <label class="field-stack">
+              <span>Seleccionar carpeta</span>
+              <input type="file" id="folder-input" webkitdirectory multiple>
+            </label>
+          </div>
+        </article>
+
+        <article class="card" id="filters-card">
+          <h2>Filtros de consulta</h2>
+          <div class="filters-grid">
+            <label class="field-stack field-span-2">
+              <span>Búsqueda general</span>
+              <input type="text" id="filter-input" placeholder="RFC, nombre, UUID o archivo">
+            </label>
+            <label class="field-stack field-span-2">
+              <span>Empleado o RFC</span>
+              <input type="text" id="employee-filter-input" placeholder="RFC, nombre o número de empleado">
+            </label>
+            <label class="field-stack">
+              <span>Fecha pago desde</span>
+              <input type="date" id="date-from">
+            </label>
+            <label class="field-stack">
+              <span>Fecha pago hasta</span>
+              <input type="date" id="date-to">
+            </label>
+            <label class="field-stack field-span-2">
+              <span>Periodicidad SAT</span>
+              <select id="periodicity-filter">
+                <option value="">Todas</option>
+                <option value="02">02 – Semanal</option>
+                <option value="04">04 – Quincenal</option>
+                <option value="05">05 – Mensual</option>
+                <option value="99">99 – Otra</option>
+              </select>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <section class="kpis-grid">
+        <article class="card kpi-card">
+          <span>CFDI procesados</span>
+          <strong id="kpi-cfdi">0</strong>
+        </article>
+        <article class="card kpi-card">
+          <span>Empleados</span>
+          <strong id="kpi-employees">0</strong>
+        </article>
+        <article class="card kpi-card">
+          <span>Periodos</span>
+          <strong id="kpi-periods">0</strong>
+        </article>
+        <article class="card kpi-card">
+          <span>Percepciones</span>
+          <strong id="kpi-percepciones">0.00</strong>
+        </article>
+        <article class="card kpi-card">
+          <span>Deducciones</span>
+          <strong id="kpi-deducciones">0.00</strong>
+        </article>
+        <article class="card kpi-card">
+          <span>Neto acumulado</span>
+          <strong id="kpi-neto">0.00</strong>
+        </article>
+      </section>
+
+      <section class="tabs-content">
+        <article class="tab-panel active" id="tab-resumen" data-tab-panel="resumen">
+          <div class="two-columns">
+            <section class="card">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Periodos de revisión</p>
+                  <h2>Periodos disponibles</h2>
+                </div>
+                <div class="button-row">
+                  <button id="periods-select-all-btn" type="button" class="ghost">Marcar todos</button>
+                  <button id="periods-unselect-all-btn" type="button" class="ghost">Desmarcar todos</button>
+                </div>
+              </div>
+              <div id="periods-list" class="selection-grid empty-box">Aún no hay periodos.</div>
+            </section>
+
+            <section class="card">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Conceptos de nómina</p>
+                  <h2>Conceptos disponibles</h2>
+                </div>
+                <div class="button-row">
+                  <button id="select-essential-btn" type="button" class="ghost">Marcar indispensables</button>
+                  <button id="select-all-btn" type="button" class="ghost">Marcar todos</button>
+                  <button id="unselect-all-btn" type="button" class="ghost">Desmarcar todos</button>
+                </div>
+              </div>
+              <div class="field-stack compact-space">
+                <span>Buscar concepto</span>
+                <input type="text" id="concept-filter-input" placeholder="Clave, concepto, tipo...">
+              </div>
+              <div id="concepts-list" class="selection-grid empty-box">Aún no hay conceptos.</div>
+            </section>
+          </div>
+        </article>
+
+        <article class="tab-panel" id="tab-cfdi" data-tab-panel="cfdi">
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Consulta operativa</p>
+                <h2>Recibos procesados</h2>
+              </div>
+              <button id="export-btn" type="button" class="primary" disabled>Exportar CFDI (CSV)</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Archivo</th>
+                    <th>RFC Emisor</th>
+                    <th>Nombre Emisor</th>
+                    <th>RFC Empleado</th>
+                    <th>Nombre Empleado</th>
+                    <th>Núm. Empleado</th>
+                    <th>Periodicidad</th>
+                    <th>Fecha Pago</th>
+                    <th>Fecha Inicial</th>
+                    <th>Fecha Final</th>
+                    <th>Días pagados</th>
+                    <th>Total Percepciones</th>
+                    <th>Total Deducciones</th>
+                    <th>Total Otros Pagos</th>
+                    <th>Total CFDI</th>
+                    <th>UUID</th>
+                  </tr>
+                </thead>
+                <tbody id="results-table-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </article>
+
+        <article class="tab-panel" id="tab-movimientos" data-tab-panel="movimientos">
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Detalle por movimiento</p>
+                <h2>Movimientos por concepto</h2>
+              </div>
+              <button id="export-concepts-detail-btn" type="button" class="primary" disabled>Exportar movimientos (CSV)</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Tipo SAT</th>
+                    <th>Clave</th>
+                    <th>Concepto</th>
+                    <th>RFC Empleado</th>
+                    <th>Nombre Empleado</th>
+                    <th>Núm. Empleado</th>
+                    <th>Fecha Pago</th>
+                    <th>Importe gravado</th>
+                    <th>Importe exento</th>
+                    <th>Importe total</th>
+                    <th>UUID</th>
+                  </tr>
+                </thead>
+                <tbody id="concepts-table-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </article>
+
+        <article class="tab-panel" id="tab-totales" data-tab-panel="totales">
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Agrupación</p>
+                <h2>Totales por concepto</h2>
+              </div>
+              <button id="export-concepts-summary-btn" type="button" class="primary" disabled>Exportar totales (CSV)</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Tipo SAT</th>
+                    <th>Clave</th>
+                    <th>Concepto</th>
+                    <th>Importe gravado</th>
+                    <th>Importe exento</th>
+                    <th>Importe deducciones</th>
+                    <th>Importe total</th>
+                    <th>Movimientos</th>
+                  </tr>
+                </thead>
+                <tbody id="concepts-summary-table-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </article>
+
+        <article class="tab-panel" id="tab-direccion" data-tab-panel="direccion">
+          <div class="direction-grid">
+            <section class="card direction-hero">
+              <div>
+                <p class="eyebrow">Lectura ejecutiva</p>
+                <h2>Indicadores para dirección</h2>
+                <p class="muted">Presenta los puntos clave de costo, concentración, variaciones y alertas que conviene revisar antes de tomar decisiones.</p>
+              </div>
+              <div class="direction-stats">
+                <div class="direction-stat">
+                  <span>Costo total nómina</span>
+                  <strong id="dir-total-nomina">0.00</strong>
+                </div>
+                <div class="direction-stat">
+                  <span>Promedio por empleado</span>
+                  <strong id="dir-promedio-empleado">0.00</strong>
+                </div>
+                <div class="direction-stat">
+                  <span>% deducciones</span>
+                  <strong id="dir-porc-deducciones">0.00%</strong>
+                </div>
+                <div class="direction-stat">
+                  <span>Recibos duplicados omitidos</span>
+                  <strong id="dir-duplicados-omitidos">0</strong>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Semáforo de revisión</p>
+                  <h2>Alertas operativas</h2>
+                </div>
+              </div>
+              <div id="direction-alerts" class="alert-grid"></div>
+            </section>
+
+            <section class="card">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Concentración de costo</p>
+                  <h2>Empleados con mayor importe acumulado</h2>
+                </div>
+                <button id="export-direction-employees-btn" type="button" class="ghost" disabled>Exportar CSV</button>
+              </div>
+              <div class="table-wrapper slim-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Empleado</th>
+                      <th>RFC</th>
+                      <th>Números de empleado</th>
+                      <th>Recibos</th>
+                      <th>Percepciones</th>
+                      <th>Deducciones</th>
+                      <th>Neto</th>
+                    </tr>
+                  </thead>
+                  <tbody id="direction-employees-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Conceptos relevantes</p>
+                  <h2>Conceptos que más pesan en la nómina</h2>
+                </div>
+                <button id="export-direction-concepts-btn" type="button" class="ghost" disabled>Exportar CSV</button>
+              </div>
+              <div class="table-wrapper slim-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tipo</th>
+                      <th>Clave</th>
+                      <th>Concepto</th>
+                      <th>Movimientos</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody id="direction-concepts-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card direction-full">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Panorama mensual</p>
+                  <h2>Percepciones por empleado y por mes</h2>
+                </div>
+                <button id="export-direction-monthly-btn" type="button" class="ghost" disabled>Exportar CSV</button>
+              </div>
+              <div class="table-wrapper">
+                <table>
+                  <thead id="direction-monthly-head"></thead>
+                  <tbody id="direction-monthly-body"></tbody>
+                  <tfoot id="direction-monthly-foot"></tfoot>
+                </table>
+              </div>
+            </section>
+
+            <section class="card direction-full">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Duplicidad operativa</p>
+                  <h2>Empleados con más de un recibo en el mismo periodo</h2>
+                </div>
+                <button id="export-direction-duplicates-btn" type="button" class="ghost" disabled>Exportar CSV</button>
+              </div>
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Empleado</th>
+                      <th>RFC</th>
+                      <th>Núm. Empleado</th>
+                      <th>Periodo</th>
+                      <th>Periodicidad</th>
+                      <th>Recibos</th>
+                      <th>Total nómina</th>
+                      <th>UUIDs detectados</th>
+                    </tr>
+                  </thead>
+                  <tbody id="direction-duplicates-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </article>
+
+        <article class="tab-panel" id="tab-periodos" data-tab-panel="periodos">
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Concentrado</p>
+                <h2>Totales por concepto por periodo</h2>
+              </div>
+              <button id="export-concepts-period-summary-btn" type="button" class="primary" disabled>Exportar totales por periodo (CSV)</button>
+            </div>
+            <div class="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Periodo</th>
+                    <th>Periodicidad</th>
+                    <th>Tipo</th>
+                    <th>Tipo SAT</th>
+                    <th>Clave</th>
+                    <th>Concepto</th>
+                    <th>Importe gravado</th>
+                    <th>Importe exento</th>
+                    <th>Importe deducciones</th>
+                    <th>Importe total</th>
+                    <th>Movimientos</th>
+                  </tr>
+                </thead>
+                <tbody id="concepts-period-summary-table-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </article>
+
+        <article class="tab-panel" id="tab-exportaciones" data-tab-panel="exportaciones">
+          <section class="card export-card">
+            <div>
+              <p class="eyebrow">Salida</p>
+              <h2>Exportaciones disponibles</h2>
+              <p class="muted">Las exportaciones usan exclusivamente los registros visibles con filtros, periodos y conceptos seleccionados.</p>
+            </div>
+            <div class="export-grid">
+              <button id="export-cfdi-card-btn" type="button" class="secondary" disabled>CFDI resumen CSV</button>
+              <button id="export-mov-card-btn" type="button" class="secondary" disabled>Movimientos CSV</button>
+              <button id="export-sum-card-btn" type="button" class="secondary" disabled>Totales por concepto CSV</button>
+              <button id="export-period-card-btn" type="button" class="secondary" disabled>Totales por periodo CSV</button>
+              <button id="export-polizas-json-btn" type="button" class="secondary" disabled>Pólizas de nómina JSON</button>
+              <button id="export-direction-employees-card-btn" type="button" class="secondary" disabled>Dirección · Empleados CSV</button>
+              <button id="export-direction-concepts-card-btn" type="button" class="secondary" disabled>Dirección · Conceptos CSV</button>
+              <button id="export-direction-monthly-card-btn" type="button" class="secondary" disabled>Dirección · Percepciones mensuales CSV</button>
+              <button id="export-direction-duplicates-card-btn" type="button" class="secondary" disabled>Dirección · Duplicidades CSV</button>
+            </div>
+          </section>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div class="floating-shortcuts" aria-label="Accesos rápidos">
+    <button id="go-to-filters-btn" type="button" class="shortcut-btn">Filtros</button>
+    <button id="back-to-top-btn" type="button" class="shortcut-btn">Arriba</button>
+  </div>
+
+  <script src="assets/app.js"></script>
+</body>
+
+</html>

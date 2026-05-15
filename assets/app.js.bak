@@ -1,0 +1,1682 @@
+(() => {
+  'use strict';
+
+  const PERIODICITY_MAP = {
+    '02': '02 Semanal',
+    '04': '04 Quincenal',
+    '05': '05 Mensual',
+    '99': '99 Otra'
+  };
+
+  const TYPE_LABEL = {
+    P: 'Percepción',
+    D: 'Deducción',
+    O: 'Otro pago'
+  };
+
+  const ESSENTIAL_PER = new Set(['001', '002', '003', '004', '006', '011', '012']);
+  const ESSENTIAL_DED = new Set(['001', '002', '004']);
+  const ESSENTIAL_OTH = new Set(['002', '004']);
+  const SAFE_XML_SIZE = 15 * 1024 * 1024;
+
+  const state = {
+    cfdis: [],
+    concepts: [],
+    periods: new Map(),
+    conceptMeta: new Map(),
+    periodSelection: new Map(),
+    conceptSelection: new Map(),
+    filesRead: 0,
+    validNominaCount: 0,
+    duplicateFilesSkipped: 0,
+    acceptedKeys: new Set(),
+    visibleCfdiRows: [],
+    visibleConceptRows: [],
+    visibleConceptSummary: [],
+    visiblePeriodSummary: [],
+    directionIndicators: null
+  };
+
+  const els = {
+    dropZone: document.getElementById('drop-zone'),
+    fileInput: document.getElementById('file-input'),
+    folderInput: document.getElementById('folder-input'),
+    filterInput: document.getElementById('filter-input'),
+    employeeFilterInput: document.getElementById('employee-filter-input'),
+    dateFromInput: document.getElementById('date-from'),
+    dateToInput: document.getElementById('date-to'),
+    periodicityFilter: document.getElementById('periodicity-filter'),
+    conceptFilterInput: document.getElementById('concept-filter-input'),
+    status: document.getElementById('status'),
+    clearDataBtn: document.getElementById('clear-data-btn'),
+    cfdiBody: document.getElementById('results-table-body'),
+    conceptsBody: document.getElementById('concepts-table-body'),
+    summaryBody: document.getElementById('concepts-summary-table-body'),
+    periodSummaryBody: document.getElementById('concepts-period-summary-table-body'),
+    periodsList: document.getElementById('periods-list'),
+    conceptsList: document.getElementById('concepts-list'),
+    periodsSelectAllBtn: document.getElementById('periods-select-all-btn'),
+    periodsUnselectAllBtn: document.getElementById('periods-unselect-all-btn'),
+    selectEssentialBtn: document.getElementById('select-essential-btn'),
+    selectAllBtn: document.getElementById('select-all-btn'),
+    unselectAllBtn: document.getElementById('unselect-all-btn'),
+    exportCfdiBtn: document.getElementById('export-btn'),
+    exportMovBtn: document.getElementById('export-concepts-detail-btn'),
+    exportSumBtn: document.getElementById('export-concepts-summary-btn'),
+    exportPeriodBtn: document.getElementById('export-concepts-period-summary-btn'),
+    exportPolizasBtn: document.getElementById('export-polizas-json-btn'),
+    exportCfdiCardBtn: document.getElementById('export-cfdi-card-btn'),
+    exportMovCardBtn: document.getElementById('export-mov-card-btn'),
+    exportSumCardBtn: document.getElementById('export-sum-card-btn'),
+    exportPeriodCardBtn: document.getElementById('export-period-card-btn'),
+    exportDirectionEmployeesBtn: document.getElementById('export-direction-employees-btn'),
+    exportDirectionConceptsBtn: document.getElementById('export-direction-concepts-btn'),
+    exportDirectionMonthlyBtn: document.getElementById('export-direction-monthly-btn'),
+    exportDirectionDuplicatesBtn: document.getElementById('export-direction-duplicates-btn'),
+    exportDirectionEmployeesCardBtn: document.getElementById('export-direction-employees-card-btn'),
+    exportDirectionConceptsCardBtn: document.getElementById('export-direction-concepts-card-btn'),
+    exportDirectionMonthlyCardBtn: document.getElementById('export-direction-monthly-card-btn'),
+    exportDirectionDuplicatesCardBtn: document.getElementById('export-direction-duplicates-card-btn'),
+    filtersCard: document.getElementById('filters-card'),
+    goToFiltersBtn: document.getElementById('go-to-filters-btn'),
+    backToTopBtn: document.getElementById('back-to-top-btn'),
+    tabButtons: Array.from(document.querySelectorAll('.tab-button')),
+    tabPanels: Array.from(document.querySelectorAll('[data-tab-panel]')),
+    kpiCfdi: document.getElementById('kpi-cfdi'),
+    kpiEmployees: document.getElementById('kpi-employees'),
+    kpiPeriods: document.getElementById('kpi-periods'),
+    kpiPercepciones: document.getElementById('kpi-percepciones'),
+    kpiDeducciones: document.getElementById('kpi-deducciones'),
+    kpiNeto: document.getElementById('kpi-neto'),
+    dirTotalNomina: document.getElementById('dir-total-nomina'),
+    dirPromedioEmpleado: document.getElementById('dir-promedio-empleado'),
+    dirPorcDeducciones: document.getElementById('dir-porc-deducciones'),
+    dirDuplicadosOmitidos: document.getElementById('dir-duplicados-omitidos'),
+    directionAlerts: document.getElementById('direction-alerts'),
+    directionEmployeesBody: document.getElementById('direction-employees-body'),
+    directionConceptsBody: document.getElementById('direction-concepts-body'),
+    directionDuplicatesBody: document.getElementById('direction-duplicates-body'),
+    directionMonthlyHead: document.getElementById('direction-monthly-head'),
+    directionMonthlyBody: document.getElementById('direction-monthly-body'),
+    directionMonthlyFoot: document.getElementById('direction-monthly-foot')
+  };
+
+  initialize();
+
+  function initialize() {
+    bindUploadEvents();
+    bindFilterEvents();
+    bindSelectionEvents();
+    bindExportEvents();
+    bindTabEvents();
+    bindUtilityEvents();
+    updateAll();
+  }
+
+  function bindUploadEvents() {
+    els.dropZone.addEventListener('dragover', onDragOver);
+    els.dropZone.addEventListener('dragleave', onDragLeave);
+    els.dropZone.addEventListener('drop', onDropFiles);
+    els.dropZone.addEventListener('click', () => els.fileInput.click());
+    els.dropZone.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        els.fileInput.click();
+      }
+    });
+
+    els.fileInput.addEventListener('change', (event) => handleFiles(event.target.files));
+    els.folderInput.addEventListener('change', (event) => handleFiles(event.target.files));
+  }
+
+  function bindFilterEvents() {
+    [
+      els.filterInput,
+      els.employeeFilterInput,
+      els.conceptFilterInput
+    ].forEach((input) => input.addEventListener('input', updateAll));
+
+    [
+      els.dateFromInput,
+      els.dateToInput,
+      els.periodicityFilter
+    ].forEach((input) => input.addEventListener('change', updateAll));
+  }
+
+  function bindSelectionEvents() {
+    els.periodsSelectAllBtn.addEventListener('click', () => {
+      for (const key of state.periods.keys()) state.periodSelection.set(key, true);
+      updateAll();
+    });
+
+    els.periodsUnselectAllBtn.addEventListener('click', () => {
+      for (const key of state.periods.keys()) state.periodSelection.set(key, false);
+      updateAll();
+    });
+
+    els.selectEssentialBtn.addEventListener('click', () => {
+      for (const [key, meta] of state.conceptMeta.entries()) {
+        state.conceptSelection.set(key, isEssentialConcept(meta.tipoLinea, meta.clave, meta.concepto));
+      }
+      updateAll();
+    });
+
+    els.selectAllBtn.addEventListener('click', () => {
+      for (const key of state.conceptMeta.keys()) state.conceptSelection.set(key, true);
+      updateAll();
+    });
+
+    els.unselectAllBtn.addEventListener('click', () => {
+      for (const key of state.conceptMeta.keys()) state.conceptSelection.set(key, false);
+      updateAll();
+    });
+  }
+
+  function bindExportEvents() {
+    els.exportCfdiBtn.addEventListener('click', exportCfdiCsv);
+    els.exportMovBtn.addEventListener('click', exportConceptDetailCsv);
+    els.exportSumBtn.addEventListener('click', exportConceptSummaryCsv);
+    els.exportPeriodBtn.addEventListener('click', exportConceptPeriodSummaryCsv);
+    els.exportPolizasBtn.addEventListener('click', exportPolizasJson);
+
+    els.exportCfdiCardBtn.addEventListener('click', exportCfdiCsv);
+    els.exportMovCardBtn.addEventListener('click', exportConceptDetailCsv);
+    els.exportSumCardBtn.addEventListener('click', exportConceptSummaryCsv);
+    els.exportPeriodCardBtn.addEventListener('click', exportConceptPeriodSummaryCsv);
+
+    [els.exportDirectionEmployeesBtn, els.exportDirectionEmployeesCardBtn].forEach((btn) => btn && btn.addEventListener('click', exportDirectionEmployeesCsv));
+    [els.exportDirectionConceptsBtn, els.exportDirectionConceptsCardBtn].forEach((btn) => btn && btn.addEventListener('click', exportDirectionConceptsCsv));
+    [els.exportDirectionMonthlyBtn, els.exportDirectionMonthlyCardBtn].forEach((btn) => btn && btn.addEventListener('click', exportDirectionMonthlyCsv));
+    [els.exportDirectionDuplicatesBtn, els.exportDirectionDuplicatesCardBtn].forEach((btn) => btn && btn.addEventListener('click', exportDirectionDuplicatesCsv));
+  }
+
+  function bindTabEvents() {
+    els.tabButtons.forEach((button) => {
+      button.addEventListener('click', () => setActiveTab(button.dataset.tab));
+    });
+  }
+
+  function bindUtilityEvents() {
+    els.clearDataBtn.addEventListener('click', () => {
+      resetState();
+      updateAll();
+    });
+
+    if (els.goToFiltersBtn) {
+      els.goToFiltersBtn.addEventListener('click', () => {
+        els.filtersCard?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+
+    if (els.backToTopBtn) {
+      els.backToTopBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    }
+  }
+
+  function onDragOver(event) {
+    event.preventDefault();
+    els.dropZone.classList.add('dragover');
+  }
+
+  function onDragLeave(event) {
+    event.preventDefault();
+    els.dropZone.classList.remove('dragover');
+  }
+
+  function onDropFiles(event) {
+    event.preventDefault();
+    els.dropZone.classList.remove('dragover');
+    handleFiles(event.dataTransfer.files);
+  }
+
+  function resetState() {
+    state.cfdis = [];
+    state.concepts = [];
+    state.periods = new Map();
+    state.conceptMeta = new Map();
+    state.periodSelection = new Map();
+    state.conceptSelection = new Map();
+    state.filesRead = 0;
+    state.validNominaCount = 0;
+    state.duplicateFilesSkipped = 0;
+    state.acceptedKeys = new Set();
+    state.visibleCfdiRows = [];
+    state.visibleConceptRows = [];
+    state.visibleConceptSummary = [];
+    state.visiblePeriodSummary = [];
+    state.directionIndicators = null;
+
+    els.fileInput.value = '';
+    els.folderInput.value = '';
+    els.filterInput.value = '';
+    els.employeeFilterInput.value = '';
+    els.dateFromInput.value = '';
+    els.dateToInput.value = '';
+    els.periodicityFilter.value = '';
+    els.conceptFilterInput.value = '';
+  }
+
+  async function handleFiles(fileList) {
+    const files = Array.from(fileList || []).filter((file) => file.name.toLowerCase().endsWith('.xml'));
+    if (!files.length) {
+      setStatus('No se detectaron archivos XML válidos.');
+      return;
+    }
+
+    setStatus(`Procesando ${files.length} archivo(s) XML...`);
+
+    for (const file of files) {
+      state.filesRead += 1;
+      try {
+        validateIncomingFile(file);
+        const xmlText = await readFileAsText(file);
+        processXmlFile(file.name, xmlText);
+      } catch (error) {
+        console.error(`Error al procesar ${file.name}:`, error);
+      }
+    }
+
+    updateAll();
+  }
+
+  function validateIncomingFile(file) {
+    if (!file || typeof file.name !== 'string') {
+      throw new Error('Archivo inválido.');
+    }
+    if (!file.name.toLowerCase().endsWith('.xml')) {
+      throw new Error('Extensión no permitida.');
+    }
+    if (file.size > SAFE_XML_SIZE) {
+      throw new Error(`Archivo demasiado grande: ${file.name}`);
+    }
+  }
+
+  function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      try {
+        const buffer = reader.result;
+
+        // 🔍 Detectar encoding desde el XML
+        const ascii = new TextDecoder("ascii").decode(buffer.slice(0, 200));
+        const match = ascii.match(/encoding=["']([^"']+)["']/i);
+
+        let encoding = (match && match[1].toLowerCase()) || 'utf-8';
+
+        // 🔧 Normalizar nombres comunes
+        if (encoding === 'iso-8859-1') encoding = 'latin1';
+        if (encoding === 'windows-1252') encoding = 'latin1';
+
+        const decoder = new TextDecoder(encoding);
+        const text = decoder.decode(buffer);
+
+        resolve(text);
+      } catch (err) {
+        reject(err);
+      }
+    };
+
+    reader.onerror = () => reject(new Error(`No se pudo leer ${file.name}`));
+
+    // 🔥 LEER COMO BINARIO, NO COMO TEXTO
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+  function processXmlFile(fileName, xmlText) {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+
+    if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
+      throw new Error(`XML inválido: ${fileName}`);
+    }
+
+    const comprobante = findFirstByLocalName(xmlDoc, 'Comprobante');
+    if (!comprobante) return;
+
+    const tipo = getAttr(comprobante, 'TipoDeComprobante');
+    if (tipo !== 'N') return;
+
+    const nomina = findFirstByLocalName(xmlDoc, 'Nomina');
+    if (!nomina) return;
+
+    const emisor = findFirstByLocalName(xmlDoc, 'Emisor');
+    const receptorCfdi = findFirstByLocalName(xmlDoc, 'Receptor');
+    const nominaReceptor = findChildByLocalName(nomina, 'Receptor');
+    const timbre = findFirstByLocalName(xmlDoc, 'TimbreFiscalDigital');
+
+    const cfdiRow = {
+      archivo: fileName,
+      rfcEmisor: getAttr(emisor, 'Rfc'),
+      nombreEmisor: getAttr(emisor, 'Nombre'),
+      rfcReceptor: getAttr(receptorCfdi, 'Rfc'),
+      nombreReceptor: getAttr(receptorCfdi, 'Nombre'),
+      numEmpleado: getAttr(nominaReceptor, 'NumEmpleado'),
+      periodicidadPago: getAttr(nominaReceptor, 'PeriodicidadPago'),
+      fechaPago: normalizeDateOnly(getAttr(nomina, 'FechaPago')),
+      fechaInicial: normalizeDateOnly(getAttr(nomina, 'FechaInicialPago')),
+      fechaFinal: normalizeDateOnly(getAttr(nomina, 'FechaFinalPago')),
+      diasPagados: getAttr(nomina, 'NumDiasPagados'),
+      totalPercepciones: toNumber(getAttr(nomina, 'TotalPercepciones')),
+      totalDeducciones: toNumber(getAttr(nomina, 'TotalDeducciones')),
+      totalOtrosPagos: toNumber(getAttr(nomina, 'TotalOtrosPagos')),
+      totalCfdi: toNumber(getAttr(comprobante, 'Total')),
+      uuid: getAttr(timbre, 'UUID')
+    };
+
+    const duplicateKey = buildDuplicateKey(cfdiRow, xmlText);
+    if (state.acceptedKeys.has(duplicateKey)) {
+      state.duplicateFilesSkipped += 1;
+      return;
+    }
+    state.acceptedKeys.add(duplicateKey);
+
+    state.cfdis.push(cfdiRow);
+    registerPeriod(cfdiRow);
+
+    const employeeBase = {
+      rfcEmpleado: cfdiRow.rfcReceptor,
+      nombreEmpleado: cfdiRow.nombreReceptor,
+      numEmpleado: cfdiRow.numEmpleado,
+      fechaPago: cfdiRow.fechaPago,
+      periodKey: getPeriodKey(cfdiRow),
+      uuid: cfdiRow.uuid
+    };
+
+    collectPercepciones(nomina, employeeBase);
+    collectDeducciones(nomina, employeeBase);
+    collectOtrosPagos(nomina, employeeBase);
+
+    state.validNominaCount += 1;
+  }
+
+  function collectPercepciones(nominaNode, employeeBase) {
+    forEachByLocalName(nominaNode, 'Percepcion', (node) => {
+      const gravado = toNumber(getAttr(node, 'ImporteGravado'));
+      const exento = toNumber(getAttr(node, 'ImporteExento'));
+      const total = gravado + exento;
+      if (total <= 0) return;
+
+      registerConceptRow({
+        ...employeeBase,
+        tipoLinea: 'P',
+        tipoSat: getAttr(node, 'TipoPercepcion'),
+        clave: getAttr(node, 'Clave'),
+        concepto: getAttr(node, 'Concepto'),
+        gravado,
+        exento,
+        total
+      });
+    });
+  }
+
+  function collectDeducciones(nominaNode, employeeBase) {
+    forEachByLocalName(nominaNode, 'Deduccion', (node) => {
+      const total = toNumber(getAttr(node, 'Importe'));
+      if (total <= 0) return;
+
+      registerConceptRow({
+        ...employeeBase,
+        tipoLinea: 'D',
+        tipoSat: getAttr(node, 'TipoDeduccion'),
+        clave: getAttr(node, 'Clave'),
+        concepto: getAttr(node, 'Concepto'),
+        gravado: 0,
+        exento: 0,
+        total
+      });
+    });
+  }
+
+  function collectOtrosPagos(nominaNode, employeeBase) {
+    forEachByLocalName(nominaNode, 'OtroPago', (node) => {
+      const total = toNumber(getAttr(node, 'Importe'));
+      if (total <= 0) return;
+
+      registerConceptRow({
+        ...employeeBase,
+        tipoLinea: 'O',
+        tipoSat: getAttr(node, 'TipoOtroPago'),
+        clave: getAttr(node, 'Clave'),
+        concepto: getAttr(node, 'Concepto'),
+        gravado: 0,
+        exento: 0,
+        total
+      });
+    });
+  }
+
+  function registerConceptRow(row) {
+    state.concepts.push(row);
+    const key = getConceptKey(row);
+
+    if (!state.conceptMeta.has(key)) {
+      const meta = {
+        tipoLinea: row.tipoLinea,
+        tipoSat: row.tipoSat,
+        clave: row.clave,
+        concepto: row.concepto
+      };
+      state.conceptMeta.set(key, meta);
+      state.conceptSelection.set(key, isEssentialConcept(row.tipoLinea, row.clave, row.concepto));
+    }
+  }
+
+  function registerPeriod(cfdiRow) {
+    const key = getPeriodKey(cfdiRow);
+    if (!state.periods.has(key)) {
+      state.periods.set(key, {
+        key,
+        fechaInicial: cfdiRow.fechaInicial,
+        fechaFinal: cfdiRow.fechaFinal,
+        periodicidad: cfdiRow.periodicidadPago,
+        fechaPagoEjemplo: cfdiRow.fechaPago,
+        count: 0
+      });
+      state.periodSelection.set(key, true);
+    }
+
+    const current = state.periods.get(key);
+    current.count += 1;
+  }
+
+  function updateAll() {
+    state.visibleCfdiRows = getFilteredCfdiRows();
+    state.visibleConceptRows = getFilteredConceptRows();
+    state.visibleConceptSummary = buildConceptSummary(state.visibleConceptRows);
+    state.visiblePeriodSummary = buildPeriodSummary(state.visibleConceptRows);
+    state.directionIndicators = buildDirectionIndicators();
+
+    renderStatus();
+    renderKpis();
+    renderPeriodsSelection();
+    renderConceptSelection();
+    renderCfdiTable();
+    renderConceptTable();
+    renderSummaryTable();
+    renderPeriodSummaryTable();
+    renderDirectionIndicators();
+    updateExportButtons();
+  }
+
+  function renderStatus() {
+    if (!state.filesRead) {
+      setStatus('Sin archivos cargados.');
+      return;
+    }
+
+    const duplicateText = state.duplicateFilesSkipped ? `, ${state.duplicateFilesSkipped} duplicado(s) omitido(s)` : '';
+    setStatus(`${state.filesRead} archivo(s) leído(s), ${state.validNominaCount} CFDI de nómina válidos${duplicateText}.`);
+  }
+
+  function renderKpis() {
+    const uniqueEmployees = new Set(state.visibleCfdiRows.map((row) => `${row.rfcReceptor}|${row.numEmpleado}|${row.nombreReceptor}`));
+    const visiblePeriods = new Set(state.visibleCfdiRows.map((row) => getPeriodKey(row)));
+
+    const percepciones = sumBy(state.visibleCfdiRows, (row) => row.totalPercepciones);
+    const deducciones = sumBy(state.visibleCfdiRows, (row) => row.totalDeducciones);
+    const otrosPagos = sumBy(state.visibleCfdiRows, (row) => row.totalOtrosPagos);
+    const neto = percepciones - deducciones + otrosPagos;
+
+    els.kpiCfdi.textContent = formatInteger(state.visibleCfdiRows.length);
+    els.kpiEmployees.textContent = formatInteger(uniqueEmployees.size);
+    els.kpiPeriods.textContent = formatInteger(visiblePeriods.size);
+    els.kpiPercepciones.textContent = formatMoney(percepciones);
+    els.kpiDeducciones.textContent = formatMoney(deducciones);
+    els.kpiNeto.textContent = formatMoney(neto);
+  }
+
+  function renderPeriodsSelection() {
+    clearNode(els.periodsList);
+    const periods = Array.from(state.periods.values())
+      .filter((period) => matchesGeneralPeriodFilters(period))
+      .sort(comparePeriods);
+
+    if (!periods.length) {
+      els.periodsList.textContent = 'No hay periodos que coincidan con los filtros actuales.';
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    periods.forEach((period) => fragment.appendChild(buildPeriodSelectionCard(period)));
+    els.periodsList.appendChild(fragment);
+  }
+
+  function renderConceptSelection() {
+    clearNode(els.conceptsList);
+    const conceptTerm = normalizeSearch(els.conceptFilterInput.value);
+    const concepts = Array.from(state.conceptMeta.entries())
+      .filter(([, meta]) => matchesConceptFilter(meta, conceptTerm))
+      .sort(([, a], [, b]) => compareConceptMeta(a, b));
+
+    if (!concepts.length) {
+      els.conceptsList.textContent = 'No hay conceptos que coincidan con el filtro actual.';
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    concepts.forEach(([key, meta]) => fragment.appendChild(buildConceptSelectionCard(key, meta)));
+    els.conceptsList.appendChild(fragment);
+  }
+
+  function renderCfdiTable() {
+    clearNode(els.cfdiBody);
+    const fragment = document.createDocumentFragment();
+
+    state.visibleCfdiRows.forEach((row) => {
+      fragment.appendChild(buildTableRow([
+        row.archivo,
+        row.rfcEmisor,
+        row.nombreEmisor,
+        row.rfcReceptor,
+        row.nombreReceptor,
+        row.numEmpleado,
+        describePeriodicidad(row.periodicidadPago),
+        row.fechaPago,
+        row.fechaInicial,
+        row.fechaFinal,
+        row.diasPagados,
+        formatMoney(row.totalPercepciones),
+        formatMoney(row.totalDeducciones),
+        formatMoney(row.totalOtrosPagos),
+        formatMoney(row.totalCfdi),
+        row.uuid
+      ]));
+    });
+
+    els.cfdiBody.appendChild(fragment);
+  }
+
+  function renderConceptTable() {
+    clearNode(els.conceptsBody);
+    const fragment = document.createDocumentFragment();
+
+    state.visibleConceptRows.forEach((row) => {
+      fragment.appendChild(buildTableRow([
+        TYPE_LABEL[row.tipoLinea] || row.tipoLinea,
+        row.tipoSat,
+        row.clave,
+        row.concepto,
+        row.rfcEmpleado,
+        row.nombreEmpleado,
+        row.numEmpleado,
+        row.fechaPago,
+        formatMoney(row.gravado),
+        formatMoney(row.exento),
+        formatMoney(row.total),
+        row.uuid
+      ]));
+    });
+
+    els.conceptsBody.appendChild(fragment);
+  }
+
+  function renderSummaryTable() {
+    clearNode(els.summaryBody);
+    const fragment = document.createDocumentFragment();
+
+    state.visibleConceptSummary.forEach((item) => {
+      fragment.appendChild(buildTableRow([
+        TYPE_LABEL[item.tipoLinea] || item.tipoLinea,
+        item.tipoSat,
+        item.clave,
+        item.concepto,
+        formatMoney(item.gravado),
+        formatMoney(item.exento),
+        formatMoney(item.deducciones),
+        formatMoney(item.total),
+        formatInteger(item.count)
+      ]));
+    });
+
+    els.summaryBody.appendChild(fragment);
+  }
+
+  function renderPeriodSummaryTable() {
+    clearNode(els.periodSummaryBody);
+    const fragment = document.createDocumentFragment();
+
+    state.visiblePeriodSummary.forEach((item) => {
+      const periodMeta = state.periods.get(item.periodKey);
+      const periodText = `${periodMeta?.fechaInicial || '---'} al ${periodMeta?.fechaFinal || '---'}`;
+      fragment.appendChild(buildTableRow([
+        periodText,
+        describePeriodicidad(periodMeta?.periodicidad || ''),
+        TYPE_LABEL[item.tipoLinea] || item.tipoLinea,
+        item.tipoSat,
+        item.clave,
+        item.concepto,
+        formatMoney(item.gravado),
+        formatMoney(item.exento),
+        formatMoney(item.deducciones),
+        formatMoney(item.total),
+        formatInteger(item.count)
+      ]));
+    });
+
+    els.periodSummaryBody.appendChild(fragment);
+  }
+
+  function updateExportButtons() {
+    const hasCfdi = state.visibleCfdiRows.length > 0;
+    const hasConceptRows = state.visibleConceptRows.length > 0;
+    const hasSummary = state.visibleConceptSummary.length > 0;
+    const hasPeriodSummary = state.visiblePeriodSummary.length > 0;
+
+    const directionData = state.directionIndicators || buildDirectionIndicators();
+    const hasDirectionEmployees = directionData.employees.length > 0;
+    const hasDirectionConcepts = directionData.topConcepts.length > 0;
+    const hasDirectionMonthly = directionData.monthlyPerceptions.length > 0;
+    const hasDirectionDuplicates = directionData.duplicateEmployees.length > 0;
+
+    toggleExportButton(els.exportCfdiBtn, hasCfdi);
+    toggleExportButton(els.exportCfdiCardBtn, hasCfdi);
+    toggleExportButton(els.exportMovBtn, hasConceptRows);
+    toggleExportButton(els.exportMovCardBtn, hasConceptRows);
+    toggleExportButton(els.exportSumBtn, hasSummary);
+    toggleExportButton(els.exportSumCardBtn, hasSummary);
+    toggleExportButton(els.exportPeriodBtn, hasPeriodSummary);
+    toggleExportButton(els.exportPeriodCardBtn, hasPeriodSummary);
+    toggleExportButton(els.exportPolizasBtn, hasPeriodSummary);
+    toggleExportButton(els.exportDirectionEmployeesBtn, hasDirectionEmployees);
+    toggleExportButton(els.exportDirectionEmployeesCardBtn, hasDirectionEmployees);
+    toggleExportButton(els.exportDirectionConceptsBtn, hasDirectionConcepts);
+    toggleExportButton(els.exportDirectionConceptsCardBtn, hasDirectionConcepts);
+    toggleExportButton(els.exportDirectionMonthlyBtn, hasDirectionMonthly);
+    toggleExportButton(els.exportDirectionMonthlyCardBtn, hasDirectionMonthly);
+    toggleExportButton(els.exportDirectionDuplicatesBtn, hasDirectionDuplicates);
+    toggleExportButton(els.exportDirectionDuplicatesCardBtn, hasDirectionDuplicates);
+  }
+
+  function getFilteredCfdiRows() {
+    return state.cfdis.filter((row) => matchesCfdiFilters(row));
+  }
+
+  function getFilteredConceptRows() {
+    const conceptTerm = normalizeSearch(els.conceptFilterInput.value);
+    return state.concepts.filter((row) => {
+      if (!matchesGeneralConceptFilters(row)) return false;
+      if (!matchesSelectedPeriod(row.periodKey)) return false;
+      if (!matchesSelectedConcept(getConceptKey(row))) return false;
+      if (!matchesConceptFilter(row, conceptTerm)) return false;
+      return true;
+    });
+  }
+
+  function matchesCfdiFilters(row) {
+    const quickTerm = normalizeSearch(els.filterInput.value);
+    const employeeTerm = normalizeSearch(els.employeeFilterInput.value);
+    const fromDate = els.dateFromInput.value || '';
+    const toDate = els.dateToInput.value || '';
+    const periodicity = els.periodicityFilter.value || '';
+
+    if (quickTerm) {
+      const bucket = normalizeSearch([
+        row.archivo,
+        row.rfcEmisor,
+        row.nombreEmisor,
+        row.rfcReceptor,
+        row.nombreReceptor,
+        row.numEmpleado,
+        row.uuid,
+        describePeriodicidad(row.periodicidadPago)
+      ].join(' '));
+      if (!bucket.includes(quickTerm)) return false;
+    }
+
+    if (employeeTerm) {
+      const employeeBucket = normalizeSearch([
+        row.rfcReceptor,
+        row.nombreReceptor,
+        row.numEmpleado
+      ].join(' '));
+      if (!employeeBucket.includes(employeeTerm)) return false;
+    }
+
+    if (fromDate && (!row.fechaPago || row.fechaPago < fromDate)) return false;
+    if (toDate && (!row.fechaPago || row.fechaPago > toDate)) return false;
+    if (periodicity && row.periodicidadPago !== periodicity) return false;
+    if (!matchesSelectedPeriod(getPeriodKey(row))) return false;
+
+    return true;
+  }
+
+  function matchesGeneralConceptFilters(row) {
+    const employeeTerm = normalizeSearch(els.employeeFilterInput.value);
+    const fromDate = els.dateFromInput.value || '';
+    const toDate = els.dateToInput.value || '';
+    const periodicity = els.periodicityFilter.value || '';
+    const cfdi = findCfdiByPeriodAndEmployee(row.periodKey, row.rfcEmpleado, row.numEmpleado, row.fechaPago);
+
+    if (employeeTerm) {
+      const employeeBucket = normalizeSearch([
+        row.rfcEmpleado,
+        row.nombreEmpleado,
+        row.numEmpleado
+      ].join(' '));
+      if (!employeeBucket.includes(employeeTerm)) return false;
+    }
+
+    if (fromDate && (!row.fechaPago || row.fechaPago < fromDate)) return false;
+    if (toDate && (!row.fechaPago || row.fechaPago > toDate)) return false;
+    if (periodicity && cfdi && cfdi.periodicidadPago !== periodicity) return false;
+    return true;
+  }
+
+  function matchesGeneralPeriodFilters(period) {
+    const fromDate = els.dateFromInput.value || '';
+    const toDate = els.dateToInput.value || '';
+    const periodicity = els.periodicityFilter.value || '';
+
+    if (periodicity && period.periodicidad !== periodicity) return false;
+    if (fromDate && period.fechaPagoEjemplo && period.fechaPagoEjemplo < fromDate) return false;
+    if (toDate && period.fechaPagoEjemplo && period.fechaPagoEjemplo > toDate) return false;
+    return true;
+  }
+
+  function matchesSelectedPeriod(periodKey) {
+    if (!state.periods.size) return true;
+    const selectedValues = Array.from(state.periodSelection.values());
+    const hasAnySelected = selectedValues.some(Boolean);
+    if (!hasAnySelected) return false;
+    return Boolean(state.periodSelection.get(periodKey));
+  }
+
+  function matchesSelectedConcept(conceptKey) {
+    if (!state.conceptMeta.size) return true;
+    const selectedValues = Array.from(state.conceptSelection.values());
+    const hasAnySelected = selectedValues.some(Boolean);
+    if (!hasAnySelected) return false;
+    return Boolean(state.conceptSelection.get(conceptKey));
+  }
+
+  function matchesConceptFilter(source, term) {
+    if (!term) return true;
+    const bucket = normalizeSearch([
+      source.tipoLinea,
+      TYPE_LABEL[source.tipoLinea] || '',
+      source.tipoSat,
+      source.clave,
+      source.concepto
+    ].join(' '));
+    return bucket.includes(term);
+  }
+
+  function buildConceptSummary(rows) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const key = getConceptKey(row);
+      if (!map.has(key)) {
+        map.set(key, {
+          tipoLinea: row.tipoLinea,
+          tipoSat: row.tipoSat,
+          clave: row.clave,
+          concepto: row.concepto,
+          gravado: 0,
+          exento: 0,
+          deducciones: 0,
+          total: 0,
+          count: 0
+        });
+      }
+      const item = map.get(key);
+      item.gravado += row.gravado;
+      item.exento += row.exento;
+      item.total += row.total;
+      if (row.tipoLinea === 'D') item.deducciones += row.total;
+      item.count += 1;
+    });
+
+    return Array.from(map.values()).sort(compareConceptMeta);
+  }
+
+  function buildPeriodSummary(rows) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const key = `${row.periodKey}||${getConceptKey(row)}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          periodKey: row.periodKey,
+          tipoLinea: row.tipoLinea,
+          tipoSat: row.tipoSat,
+          clave: row.clave,
+          concepto: row.concepto,
+          gravado: 0,
+          exento: 0,
+          deducciones: 0,
+          total: 0,
+          count: 0
+        });
+      }
+      const item = map.get(key);
+      item.gravado += row.gravado;
+      item.exento += row.exento;
+      item.total += row.total;
+      if (row.tipoLinea === 'D') item.deducciones += row.total;
+      item.count += 1;
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      const periodA = state.periods.get(a.periodKey);
+      const periodB = state.periods.get(b.periodKey);
+      return comparePeriods(periodA, periodB) || compareConceptMeta(a, b);
+    });
+  }
+
+  function buildPolizasNominaJson() {
+    if (!state.visiblePeriodSummary.length) return null;
+
+    const firstCfdi = state.visibleCfdiRows[0] || {};
+    const polizas = [];
+    const grouped = new Map();
+
+    state.visiblePeriodSummary.forEach((item) => {
+      if (!grouped.has(item.periodKey)) grouped.set(item.periodKey, []);
+      grouped.get(item.periodKey).push(item);
+    });
+
+    for (const [periodKey, items] of grouped.entries()) {
+      const periodMeta = state.periods.get(periodKey);
+      const cfdis = state.visibleCfdiRows.filter((row) => getPeriodKey(row) === periodKey);
+      const fechaPago = cfdis.map((row) => row.fechaPago).filter(Boolean).sort()[0] || periodMeta?.fechaPagoEjemplo || '';
+      const empleados = new Set(cfdis.map((row) => `${row.rfcReceptor}|${row.numEmpleado}`));
+
+      const totalPercepcionesGravadas = sumBy(items.filter((item) => item.tipoLinea === 'P'), (item) => item.gravado);
+      const totalPercepcionesExentas = sumBy(items.filter((item) => item.tipoLinea === 'P'), (item) => item.exento);
+      const totalDeducciones = sumBy(items.filter((item) => item.tipoLinea === 'D'), (item) => item.total);
+      const totalOtrosPagos = sumBy(items.filter((item) => item.tipoLinea === 'O'), (item) => item.total);
+      const netoAPagar = totalPercepcionesGravadas + totalPercepcionesExentas - totalDeducciones + totalOtrosPagos;
+
+      polizas.push({
+        identificador: `${describePeriodicidad(periodMeta?.periodicidad || '').replace(/\s+/g, '_')}_${periodMeta?.fechaInicial || 'sin_fecha'}_${periodMeta?.fechaFinal || 'sin_fecha'}`,
+        tipo_periodo: describePeriodicidad(periodMeta?.periodicidad || ''),
+        periodicidad_sat: periodMeta?.periodicidad || '',
+        numero_periodo: '',
+        fecha_inicial: periodMeta?.fechaInicial || '',
+        fecha_final: periodMeta?.fechaFinal || '',
+        fecha_pago: fechaPago,
+        fecha_poliza: fechaPago,
+        tipo_poliza_contpaq: 3,
+        clase: 1,
+        id_diario: 'NOMINA',
+        concepto_poliza: `Nómina ${describePeriodicidad(periodMeta?.periodicidad || '')} ${periodMeta?.fechaInicial || ''} al ${periodMeta?.fechaFinal || ''}`.trim(),
+        resumen: {
+          total_percepciones_gravadas: roundMoney(totalPercepcionesGravadas),
+          total_percepciones_exentas: roundMoney(totalPercepcionesExentas),
+          total_deducciones: roundMoney(totalDeducciones),
+          total_otros_pagos: roundMoney(totalOtrosPagos),
+          total_cuotas_patronales: 0,
+          neto_a_pagar: roundMoney(netoAPagar),
+          numero_empleados: empleados.size
+        },
+        detalle_conceptos: items.map((item) => ({
+          grupo: TYPE_LABEL[item.tipoLinea] || item.tipoLinea,
+          tipo_linea: item.tipoLinea,
+          tipo_sat: item.tipoSat,
+          clave: item.clave,
+          descripcion: item.concepto,
+          importe_gravado: roundMoney(item.gravado),
+          importe_exento: roundMoney(item.exento),
+          importe_total: roundMoney(item.total),
+          numero_movimientos: item.count
+        }))
+      });
+    }
+
+    return {
+      empresa_rfc: firstCfdi.rfcEmisor || '',
+      empresa_nombre: firstCfdi.nombreEmisor || '',
+      polizas_nomina: polizas
+    };
+  }
+
+  function exportCfdiCsv() {
+    if (!state.visibleCfdiRows.length) return;
+    const rows = [
+      ['Archivo', 'RFC Emisor', 'Nombre Emisor', 'RFC Empleado', 'Nombre Empleado', 'Núm. Empleado', 'Periodicidad', 'Fecha Pago', 'Fecha Inicial', 'Fecha Final', 'Días pagados', 'Total Percepciones', 'Total Deducciones', 'Total Otros Pagos', 'Total CFDI', 'UUID'],
+      ...state.visibleCfdiRows.map((row) => [
+        row.archivo,
+        row.rfcEmisor,
+        row.nombreEmisor,
+        row.rfcReceptor,
+        row.nombreReceptor,
+        row.numEmpleado,
+        describePeriodicidad(row.periodicidadPago),
+        row.fechaPago,
+        row.fechaInicial,
+        row.fechaFinal,
+        row.diasPagados,
+        row.totalPercepciones,
+        row.totalDeducciones,
+        row.totalOtrosPagos,
+        row.totalCfdi,
+        row.uuid
+      ])
+    ];
+    downloadCsv('nomina_cfdi_resumen.csv', rows);
+  }
+
+  function exportConceptDetailCsv() {
+    if (!state.visibleConceptRows.length) return;
+    const rows = [
+      ['Tipo', 'Tipo SAT', 'Clave', 'Concepto', 'RFC Empleado', 'Nombre Empleado', 'Núm. Empleado', 'Fecha Pago', 'Importe gravado', 'Importe exento', 'Importe total', 'UUID'],
+      ...state.visibleConceptRows.map((row) => [
+        TYPE_LABEL[row.tipoLinea] || row.tipoLinea,
+        row.tipoSat,
+        row.clave,
+        row.concepto,
+        row.rfcEmpleado,
+        row.nombreEmpleado,
+        row.numEmpleado,
+        row.fechaPago,
+        row.gravado,
+        row.exento,
+        row.total,
+        row.uuid
+      ])
+    ];
+    downloadCsv('nomina_movimientos_concepto.csv', rows);
+  }
+
+  function exportConceptSummaryCsv() {
+    if (!state.visibleConceptSummary.length) return;
+    const rows = [
+      ['Tipo', 'Tipo SAT', 'Clave', 'Concepto', 'Importe gravado', 'Importe exento', 'Importe deducciones', 'Importe total', 'Movimientos'],
+      ...state.visibleConceptSummary.map((item) => [
+        TYPE_LABEL[item.tipoLinea] || item.tipoLinea,
+        item.tipoSat,
+        item.clave,
+        item.concepto,
+        item.gravado,
+        item.exento,
+        item.deducciones,
+        item.total,
+        item.count
+      ])
+    ];
+    downloadCsv('nomina_totales_concepto.csv', rows);
+  }
+
+  function exportConceptPeriodSummaryCsv() {
+    if (!state.visiblePeriodSummary.length) return;
+    const rows = [
+      ['Periodo', 'Periodicidad', 'Tipo', 'Tipo SAT', 'Clave', 'Concepto', 'Importe gravado', 'Importe exento', 'Importe deducciones', 'Importe total', 'Movimientos'],
+      ...state.visiblePeriodSummary.map((item) => {
+        const periodMeta = state.periods.get(item.periodKey);
+        return [
+          `${periodMeta?.fechaInicial || '---'} al ${periodMeta?.fechaFinal || '---'}`,
+          describePeriodicidad(periodMeta?.periodicidad || ''),
+          TYPE_LABEL[item.tipoLinea] || item.tipoLinea,
+          item.tipoSat,
+          item.clave,
+          item.concepto,
+          item.gravado,
+          item.exento,
+          item.deducciones,
+          item.total,
+          item.count
+        ];
+      })
+    ];
+    downloadCsv('nomina_totales_concepto_por_periodo.csv', rows);
+  }
+
+  function exportPolizasJson() {
+    const data = buildPolizasNominaJson();
+    if (!data) return;
+    downloadText('polizas_nomina_por_periodo.json', JSON.stringify(data, null, 2), 'application/json;charset=utf-8;');
+  }
+
+
+
+  function exportDirectionEmployeesCsv() {
+    const data = state.directionIndicators || buildDirectionIndicators();
+    if (!data.employees.length) return;
+    const rows = [
+      ['Empleado', 'RFC', 'Numeros de empleado', 'Recibos', 'Percepciones', 'Deducciones', 'Neto'],
+      ...data.employees.map((row) => [
+        row.nombreEmpleado,
+        row.rfcEmpleado,
+        row.numerosEmpleado,
+        row.recibos,
+        row.percepciones,
+        row.deducciones,
+        row.neto
+      ])
+    ];
+    downloadCsv('direccion_empleados_mayor_importe.csv', rows);
+  }
+
+  function exportDirectionConceptsCsv() {
+    const data = state.directionIndicators || buildDirectionIndicators();
+    if (!data.topConcepts.length) return;
+    const rows = [
+      ['Tipo', 'Clave', 'Concepto', 'Movimientos', 'Total'],
+      ...data.topConcepts.map((row) => [
+        TYPE_LABEL[row.tipoLinea] || row.tipoLinea,
+        row.clave,
+        row.concepto,
+        row.count,
+        row.total
+      ])
+    ];
+    downloadCsv('direccion_conceptos_relevantes.csv', rows);
+  }
+
+  function exportDirectionMonthlyCsv() {
+    const data = state.directionIndicators || buildDirectionIndicators();
+    if (!data.monthlyPerceptions.length) return;
+    const header = ['Empleado', 'RFC', ...data.monthlyColumns, 'Total'];
+    const body = data.monthlyPerceptions.map((row) => [
+      row.nombreEmpleado,
+      row.rfcEmpleado,
+      ...row.valores,
+      row.total
+    ]);
+    const totals = ['Total general', '', ...data.monthlyTotals, data.grandTotalPerceptions];
+    downloadCsv('direccion_percepciones_por_empleado_y_mes.csv', [header, ...body, totals]);
+  }
+
+  function exportDirectionDuplicatesCsv() {
+    const data = state.directionIndicators || buildDirectionIndicators();
+    if (!data.duplicateEmployees.length) return;
+    const rows = [
+      ['Empleado', 'RFC', 'Numeros de empleado', 'Periodo', 'Periodicidad', 'Recibos', 'Total nomina', 'UUIDs detectados'],
+      ...data.duplicateEmployees.map((row) => {
+        const period = state.periods.get(row.periodKey);
+        return [
+          row.nombreEmpleado,
+          row.rfcEmpleado,
+          row.numerosEmpleado,
+          `${period?.fechaInicial || '---'} al ${period?.fechaFinal || '---'}`,
+          describePeriodicidad(row.periodicidad),
+          row.recibos.length,
+          row.totalNomina,
+          Array.from(row.uuids).join(' | ')
+        ];
+      })
+    ];
+    downloadCsv('direccion_duplicidades_por_periodo.csv', rows);
+  }
+
+  function buildDirectionIndicators() {
+    const rows = state.visibleCfdiRows;
+    const conceptSummary = state.visibleConceptSummary;
+    const employeeMap = new Map();
+    const duplicateGroups = new Map();
+    const monthlyPerceptionsMap = new Map();
+    const monthSet = new Set();
+
+    rows.forEach((row) => {
+      const employeeKey = row.rfcReceptor || `${row.nombreReceptor}|${row.numEmpleado}`;
+      if (!employeeMap.has(employeeKey)) {
+        employeeMap.set(employeeKey, {
+          nombreEmpleado: row.nombreReceptor,
+          rfcEmpleado: row.rfcReceptor,
+          numerosEmpleado: new Set(),
+          recibos: 0,
+          percepciones: 0,
+          deducciones: 0,
+          otrosPagos: 0,
+          neto: 0
+        });
+      }
+      const employee = employeeMap.get(employeeKey);
+      employee.recibos += 1;
+      employee.percepciones += row.totalPercepciones;
+      employee.deducciones += row.totalDeducciones;
+      employee.otrosPagos += row.totalOtrosPagos;
+      employee.neto += row.totalPercepciones - row.totalDeducciones + row.totalOtrosPagos;
+      if (row.numEmpleado) employee.numerosEmpleado.add(row.numEmpleado);
+      if ((!employee.nombreEmpleado || employee.nombreEmpleado.length < row.nombreReceptor.length) && row.nombreReceptor) {
+        employee.nombreEmpleado = row.nombreReceptor;
+      }
+
+      const duplicateKey = `${getPeriodKey(row)}|${row.rfcReceptor || row.nombreReceptor}`;
+      if (!duplicateGroups.has(duplicateKey)) {
+        duplicateGroups.set(duplicateKey, {
+          nombreEmpleado: row.nombreReceptor,
+          rfcEmpleado: row.rfcReceptor,
+          numerosEmpleado: new Set(),
+          periodKey: getPeriodKey(row),
+          periodicidad: row.periodicidadPago,
+          recibos: [],
+          uuids: new Set(),
+          totalNomina: 0
+        });
+      }
+      const group = duplicateGroups.get(duplicateKey);
+      group.recibos.push(row);
+      if (row.uuid) group.uuids.add(row.uuid);
+      if (row.numEmpleado) group.numerosEmpleado.add(row.numEmpleado);
+      group.totalNomina += row.totalCfdi;
+
+      const monthKey = (row.fechaPago || '').slice(0, 7) || 'Sin fecha';
+      monthSet.add(monthKey);
+      if (!monthlyPerceptionsMap.has(employeeKey)) {
+        monthlyPerceptionsMap.set(employeeKey, {
+          nombreEmpleado: row.nombreReceptor,
+          rfcEmpleado: row.rfcReceptor,
+          meses: new Map(),
+          total: 0
+        });
+      }
+      const monthlyEmployee = monthlyPerceptionsMap.get(employeeKey);
+      if ((!monthlyEmployee.nombreEmpleado || monthlyEmployee.nombreEmpleado.length < row.nombreReceptor.length) && row.nombreReceptor) {
+        monthlyEmployee.nombreEmpleado = row.nombreReceptor;
+      }
+      monthlyEmployee.meses.set(monthKey, (monthlyEmployee.meses.get(monthKey) || 0) + row.totalPercepciones);
+      monthlyEmployee.total += row.totalPercepciones;
+    });
+
+    const employees = Array.from(employeeMap.values())
+      .map((item) => ({
+        ...item,
+        numerosEmpleado: Array.from(item.numerosEmpleado).sort().join(' | ')
+      }))
+      .sort((a, b) => b.neto - a.neto)
+      .slice(0, 10);
+
+    const topConcepts = [...conceptSummary]
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+
+    const duplicateEmployees = Array.from(duplicateGroups.values())
+      .filter((item) => item.recibos.length > 1 && item.uuids.size > 1)
+      .map((item) => ({
+        ...item,
+        numerosEmpleado: Array.from(item.numerosEmpleado).sort().join(' | ')
+      }))
+      .sort((a, b) => b.recibos.length - a.recibos.length || b.totalNomina - a.totalNomina);
+
+    const monthlyColumns = Array.from(monthSet).sort();
+    const monthlyPerceptions = Array.from(monthlyPerceptionsMap.values())
+      .map((item) => ({
+        nombreEmpleado: item.nombreEmpleado,
+        rfcEmpleado: item.rfcEmpleado,
+        total: item.total,
+        valores: monthlyColumns.map((month) => item.meses.get(month) || 0)
+      }))
+      .sort((a, b) => b.total - a.total || a.nombreEmpleado.localeCompare(b.nombreEmpleado, 'es'));
+
+    const monthlyTotals = monthlyColumns.map((month, index) => monthlyPerceptions.reduce((acc, row) => acc + (row.valores[index] || 0), 0));
+    const grandTotalPerceptions = monthlyTotals.reduce((acc, value) => acc + value, 0);
+
+    const totalNomina = sumBy(rows, (row) => row.totalCfdi);
+    const totalDeducciones = sumBy(rows, (row) => row.totalDeducciones);
+    const employeeCount = employeeMap.size;
+    const promedioEmpleado = employeeCount ? totalNomina / employeeCount : 0;
+    const porcentajeDeducciones = totalNomina ? (totalDeducciones / totalNomina) * 100 : 0;
+    const periodoMasCostoso = [...state.periods.values()]
+      .map((period) => ({
+        ...period,
+        total: sumBy(rows.filter((row) => getPeriodKey(row) === period.key), (row) => row.totalCfdi)
+      }))
+      .sort((a, b) => b.total - a.total)[0] || null;
+
+    return {
+      totalNomina,
+      promedioEmpleado,
+      porcentajeDeducciones,
+      employees,
+      topConcepts,
+      duplicateEmployees,
+      monthlyPerceptions,
+      monthlyColumns,
+      monthlyTotals,
+      grandTotalPerceptions,
+      alerts: [
+        {
+          tone: state.duplicateFilesSkipped ? 'danger' : 'success',
+          label: 'Recibos duplicados omitidos en carga',
+          value: formatInteger(state.duplicateFilesSkipped),
+          helper: state.duplicateFilesSkipped ? 'Se detectaron archivos ya incorporados y no se duplicaron en el tablero.' : 'Sin duplicados exactos durante la carga actual.'
+        },
+        {
+          tone: duplicateEmployees.length ? 'warning' : 'success',
+          label: 'Empleados con más de un recibo en el mismo periodo',
+          value: formatInteger(duplicateEmployees.length),
+          helper: duplicateEmployees.length ? 'Conviene validar ajustes, finiquitos, complementos o incidencias capturadas por separado.' : 'No se detectan casos repetidos por empleado y periodo.'
+        },
+        {
+          tone: periodoMasCostoso ? 'warning' : 'success',
+          label: 'Periodo con mayor costo de nómina',
+          value: periodoMasCostoso ? formatMoney(periodoMasCostoso.total) : '0.00',
+          helper: periodoMasCostoso ? `${periodoMasCostoso.fechaInicial || '---'} al ${periodoMasCostoso.fechaFinal || '---'} • ${describePeriodicidad(periodoMasCostoso.periodicidad)}` : 'Sin información suficiente para comparar periodos.'
+        },
+        {
+          tone: porcentajeDeducciones > 20 ? 'warning' : 'success',
+          label: 'Presión de deducciones sobre nómina',
+          value: `${roundMoney(porcentajeDeducciones).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`,
+          helper: porcentajeDeducciones > 20 ? 'Revisa si hay descuentos extraordinarios, ISR elevado o ajustes acumulados.' : 'La carga de deducciones se mantiene en un rango operativo normal.'
+        }
+      ]
+    };
+  }
+
+  function renderDirectionIndicators() {
+    const data = state.directionIndicators || buildDirectionIndicators();
+    els.dirTotalNomina.textContent = formatMoney(data.totalNomina);
+    els.dirPromedioEmpleado.textContent = formatMoney(data.promedioEmpleado);
+    els.dirPorcDeducciones.textContent = `${roundMoney(data.porcentajeDeducciones).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+    els.dirDuplicadosOmitidos.textContent = formatInteger(state.duplicateFilesSkipped);
+
+    renderDirectionAlerts(data.alerts);
+    renderDirectionEmployees(data.employees);
+    renderDirectionConcepts(data.topConcepts);
+    renderDirectionMonthlyPerceptions(data.monthlyColumns, data.monthlyPerceptions, data.monthlyTotals, data.grandTotalPerceptions);
+    renderDirectionDuplicates(data.duplicateEmployees);
+  }
+
+  function renderDirectionAlerts(alerts) {
+    clearNode(els.directionAlerts);
+    const fragment = document.createDocumentFragment();
+    alerts.forEach((alert) => {
+      const item = document.createElement('article');
+      item.className = `alert-item alert-${alert.tone}`;
+      const label = document.createElement('span');
+      label.textContent = alert.label;
+      const value = document.createElement('strong');
+      value.textContent = alert.value;
+      const helper = document.createElement('small');
+      helper.textContent = alert.helper;
+      item.append(label, value, helper);
+      fragment.appendChild(item);
+    });
+    els.directionAlerts.appendChild(fragment);
+  }
+
+  function renderDirectionEmployees(rows) {
+    clearNode(els.directionEmployeesBody);
+    if (!rows.length) {
+      els.directionEmployeesBody.appendChild(buildEmptyRow(7, 'Sin información disponible con los filtros actuales.'));
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    rows.forEach((row) => {
+      fragment.appendChild(buildTableRow([
+        row.nombreEmpleado,
+        row.rfcEmpleado,
+        row.numerosEmpleado,
+        formatInteger(row.recibos),
+        formatMoney(row.percepciones),
+        formatMoney(row.deducciones),
+        formatMoney(row.neto)
+      ]));
+    });
+    els.directionEmployeesBody.appendChild(fragment);
+  }
+
+  function renderDirectionConcepts(rows) {
+    clearNode(els.directionConceptsBody);
+    if (!rows.length) {
+      els.directionConceptsBody.appendChild(buildEmptyRow(5, 'Sin conceptos visibles para resumir.'));
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    rows.forEach((row) => {
+      fragment.appendChild(buildTableRow([
+        TYPE_LABEL[row.tipoLinea] || row.tipoLinea,
+        row.clave,
+        row.concepto,
+        formatInteger(row.count),
+        formatMoney(row.total)
+      ]));
+    });
+    els.directionConceptsBody.appendChild(fragment);
+  }
+
+  function renderDirectionMonthlyPerceptions(columns, rows, totals, grandTotal) {
+    clearNode(els.directionMonthlyHead);
+    clearNode(els.directionMonthlyBody);
+    clearNode(els.directionMonthlyFoot);
+
+    const headRow = document.createElement('tr');
+    ['Empleado', 'RFC', ...columns, 'Total'].forEach((label) => {
+      const th = document.createElement('th');
+      th.textContent = label === 'Sin fecha' ? 'Sin fecha' : label;
+      headRow.appendChild(th);
+    });
+    els.directionMonthlyHead.appendChild(headRow);
+
+    if (!rows.length) {
+      els.directionMonthlyBody.appendChild(buildEmptyRow(columns.length + 3, 'Aún no hay percepciones suficientes para construir el comparativo mensual.'));
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    rows.forEach((row) => {
+      fragment.appendChild(buildTableRow([
+        row.nombreEmpleado,
+        row.rfcEmpleado,
+        ...row.valores.map((value) => formatMoney(value)),
+        formatMoney(row.total)
+      ]));
+    });
+    els.directionMonthlyBody.appendChild(fragment);
+
+    const footRow = document.createElement('tr');
+    footRow.className = 'totals-row';
+    ['Total general', '', ...totals.map((value) => formatMoney(value)), formatMoney(grandTotal)].forEach((value, index) => {
+      const cell = document.createElement(index < 2 ? 'th' : 'td');
+      cell.textContent = value;
+      footRow.appendChild(cell);
+    });
+    els.directionMonthlyFoot.appendChild(footRow);
+  }
+
+  function renderDirectionDuplicates(rows) {
+    clearNode(els.directionDuplicatesBody);
+    if (!rows.length) {
+      els.directionDuplicatesBody.appendChild(buildEmptyRow(8, 'No se detectaron empleados con más de un recibo distinto en el mismo periodo.'));
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    rows.forEach((row) => {
+      const period = state.periods.get(row.periodKey);
+      fragment.appendChild(buildTableRow([
+        row.nombreEmpleado,
+        row.rfcEmpleado,
+        row.numerosEmpleado,
+        `${period?.fechaInicial || '---'} al ${period?.fechaFinal || '---'}`,
+        describePeriodicidad(row.periodicidad),
+        formatInteger(row.recibos.length),
+        formatMoney(row.totalNomina),
+        Array.from(row.uuids).join(' | ')
+      ]));
+    });
+    els.directionDuplicatesBody.appendChild(fragment);
+  }
+
+  function buildEmptyRow(colspan, text) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = colspan;
+    td.className = 'empty-state';
+    td.textContent = text;
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function buildDuplicateKey(cfdiRow, xmlText) {
+    if (cfdiRow.uuid) return `uuid:${cfdiRow.uuid}`;
+    return `fallback:${simpleHash([
+      cfdiRow.rfcEmisor,
+      cfdiRow.rfcReceptor,
+      cfdiRow.numEmpleado,
+      cfdiRow.fechaPago,
+      cfdiRow.fechaInicial,
+      cfdiRow.fechaFinal,
+      cfdiRow.totalCfdi,
+      normalizeSearch(xmlText)
+    ].join('|'))}`;
+  }
+
+  function simpleHash(text) {
+    let hash = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = ((hash << 5) - hash) + text.charCodeAt(index);
+      hash |= 0;
+    }
+    return String(hash >>> 0);
+  }
+
+  function buildPeriodSelectionCard(period) {
+    const card = document.createElement('div');
+    card.className = 'selection-item';
+
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = Boolean(state.periodSelection.get(period.key));
+    checkbox.addEventListener('change', () => {
+      state.periodSelection.set(period.key, checkbox.checked);
+      updateAll();
+    });
+
+    const main = document.createElement('div');
+    main.className = 'selection-main';
+
+    const title = document.createElement('strong');
+    title.textContent = `${period.fechaInicial || '---'} al ${period.fechaFinal || '---'}`;
+
+    const desc = document.createElement('span');
+    desc.className = 'muted small-text';
+    desc.textContent = `${describePeriodicidad(period.periodicidad)} • ${formatInteger(period.count)} CFDI`;
+
+    main.appendChild(title);
+    main.appendChild(desc);
+    label.appendChild(checkbox);
+    label.appendChild(main);
+    card.appendChild(label);
+    return card;
+  }
+
+  function buildConceptSelectionCard(key, meta) {
+    const card = document.createElement('div');
+    card.className = 'selection-item';
+
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = Boolean(state.conceptSelection.get(key));
+    checkbox.addEventListener('change', () => {
+      state.conceptSelection.set(key, checkbox.checked);
+      updateAll();
+    });
+
+    const main = document.createElement('div');
+    main.className = 'selection-main';
+
+    const title = document.createElement('strong');
+    title.textContent = `${meta.clave || 'Sin clave'} · ${meta.concepto || 'Sin concepto'}`;
+
+    const badges = document.createElement('div');
+    badges.className = 'badges';
+    badges.appendChild(buildBadge(TYPE_LABEL[meta.tipoLinea] || meta.tipoLinea, getBadgeClass(meta.tipoLinea)));
+    badges.appendChild(buildBadge(`SAT ${meta.tipoSat || '—'}`, 'badge-gray'));
+    if (isEssentialConcept(meta.tipoLinea, meta.clave, meta.concepto)) {
+      badges.appendChild(buildBadge('Indispensable', 'badge-green'));
+    }
+
+    main.appendChild(title);
+    main.appendChild(badges);
+    label.appendChild(checkbox);
+    label.appendChild(main);
+    card.appendChild(label);
+    return card;
+  }
+
+  function buildBadge(text, className) {
+    const span = document.createElement('span');
+    span.className = `badge ${className}`;
+    span.textContent = text;
+    return span;
+  }
+
+  function buildTableRow(values) {
+    const tr = document.createElement('tr');
+    values.forEach((value) => {
+      const td = document.createElement('td');
+      td.textContent = String(value ?? '');
+      tr.appendChild(td);
+    });
+    return tr;
+  }
+
+  function setActiveTab(tabName) {
+    els.tabButtons.forEach((button) => button.classList.toggle('active', button.dataset.tab === tabName));
+    els.tabPanels.forEach((panel) => panel.classList.toggle('active', panel.dataset.tabPanel === tabName));
+  }
+
+  function setStatus(text) {
+    els.status.textContent = text;
+  }
+
+  function toggleExportButton(button, enabled) {
+    button.disabled = !enabled;
+  }
+
+  function clearNode(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function findFirstByLocalName(root, localName) {
+    if (!root) return null;
+    const byNs = root.getElementsByTagNameNS('*', localName);
+    if (byNs && byNs.length) return byNs[0];
+    const all = root.getElementsByTagName('*');
+    for (let index = 0; index < all.length; index += 1) {
+      if (all[index].localName === localName) return all[index];
+    }
+    return null;
+  }
+
+  function findChildByLocalName(root, localName) {
+    if (!root) return null;
+    const children = root.children || [];
+    for (let index = 0; index < children.length; index += 1) {
+      if (children[index].localName === localName) return children[index];
+    }
+    return null;
+  }
+
+  function forEachByLocalName(root, localName, callback) {
+    const nodes = root.getElementsByTagNameNS('*', localName);
+    for (let index = 0; index < nodes.length; index += 1) callback(nodes[index], index);
+  }
+
+  function getAttr(node, attrName) {
+    return node && node.getAttribute(attrName) ? node.getAttribute(attrName) : '';
+  }
+
+  function normalizeDateOnly(value) {
+    if (!value) return '';
+    return String(value).slice(0, 10);
+  }
+
+  function toNumber(value) {
+    if (value === null || value === undefined || value === '') return 0;
+    const normalized = String(value).replace(/,/g, '');
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function roundMoney(value) {
+    return Number.parseFloat((value || 0).toFixed(2));
+  }
+
+  function formatMoney(value) {
+    return roundMoney(value).toLocaleString('es-MX', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  function formatInteger(value) {
+    return Number(value || 0).toLocaleString('es-MX');
+  }
+
+  function normalizeSearch(value) {
+    return String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  }
+
+  function describePeriodicidad(code) {
+    return PERIODICITY_MAP[code] || code || '';
+  }
+
+  function getPeriodKey(row) {
+    return [row.fechaInicial || '', row.fechaFinal || '', row.periodicidadPago || ''].join('|');
+  }
+
+  function getConceptKey(row) {
+    return [row.tipoLinea || '', row.tipoSat || '', row.clave || '', row.concepto || ''].join('|');
+  }
+
+  function isEssentialConcept(tipoLinea, clave, concepto) {
+    const normalizedClave = String(clave || '').trim();
+    const lowerConcept = normalizeSearch(concepto);
+
+    if (tipoLinea === 'P' && ESSENTIAL_PER.has(normalizedClave)) return true;
+    if (tipoLinea === 'D' && ESSENTIAL_DED.has(normalizedClave)) return true;
+    if (tipoLinea === 'O' && ESSENTIAL_OTH.has(normalizedClave)) return true;
+
+    return [
+      'sueldo',
+      'salario',
+      'isr',
+      'imss',
+      'seguridad social',
+      'subsidio'
+    ].some((keyword) => lowerConcept.includes(keyword));
+  }
+
+  function getBadgeClass(tipoLinea) {
+    if (tipoLinea === 'P') return 'badge-blue';
+    if (tipoLinea === 'D') return 'badge-red';
+    return 'badge-green';
+  }
+
+  function comparePeriods(a, b) {
+    if (!a && !b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+    return (
+      String(a.fechaInicial || '').localeCompare(String(b.fechaInicial || '')) ||
+      String(a.fechaFinal || '').localeCompare(String(b.fechaFinal || '')) ||
+      String(a.periodicidad || '').localeCompare(String(b.periodicidad || ''))
+    );
+  }
+
+  function compareConceptMeta(a, b) {
+    return (
+      String(a.tipoLinea || '').localeCompare(String(b.tipoLinea || '')) ||
+      String(a.tipoSat || '').localeCompare(String(b.tipoSat || '')) ||
+      String(a.clave || '').localeCompare(String(b.clave || '')) ||
+      String(a.concepto || '').localeCompare(String(b.concepto || ''))
+    );
+  }
+
+  function sumBy(collection, getter) {
+    return collection.reduce((acc, item) => acc + toNumber(getter(item)), 0);
+  }
+
+  function findCfdiByPeriodAndEmployee(periodKey, rfcEmpleado, numEmpleado, fechaPago) {
+    return state.cfdis.find((row) => {
+      return getPeriodKey(row) === periodKey && row.rfcReceptor === rfcEmpleado && row.numEmpleado === numEmpleado && row.fechaPago === fechaPago;
+    }) || null;
+  }
+
+function escapeCsv(value) {
+  const text = String(value ?? '').normalize("NFC"); // 🔹 Normaliza acentos y caracteres
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+
+  function downloadCsv(fileName, rows) {
+    const content = rows.map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+    downloadText(fileName, content, 'text/csv;charset=utf-8;');
+  }
+
+  function downloadText(fileName, content, mimeType) {
+  const blob = new Blob([new TextEncoder("utf-8").encode(content)], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+})();
